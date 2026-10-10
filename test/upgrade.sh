@@ -138,6 +138,7 @@ if wait_ready; then pass "new version started on the old data"; else fail "new v
 
 check "migrations ran without errors" bash -c "! docker logs ${ID}-app 2>&1 | grep -qiE 'migration.*(failed|error)'"
 check "secrets and settings unchanged" test "$(secrets_sum)" = "${before_secrets}"
+check "every secret present once after the update" app_exec sh -c 'for k in JWT_SECRET MULTICA_VCS_SECRET_KEY MULTICA_PLUGIN_SECRET_KEY; do [ "$(grep -c "^$k=" /app/data/.secrets/secrets.env)" = 1 ] || exit 1; done' 
 check "session from before the update still valid" bash -c "curl -fs -H 'Authorization: Bearer ${token}' '${ORIGIN}/api/me' | jq -e --arg e '${EMAIL}' '.email == \$e'"
 check "workspace kept" bash -c "curl -fs -H 'Authorization: Bearer ${token}' '${ORIGIN}/api/workspaces' | jq -e --arg id '${workspace_id}' '[.. | objects | select(.id? == \$id)] | length > 0'"
 check "issue kept" test "$(api GET "/api/issues/${issue_id}" | jq -r '.title // empty')" = "Survives the update"

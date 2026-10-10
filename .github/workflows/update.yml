@@ -51,7 +51,21 @@ jobs:
         id: upstream
         env:
           GH_TOKEN: ${{ github.token }}
+          FORCE: ${{ inputs.release_package_changes }}
         run: |
+          # The release currently pinned in the Dockerfile: a forced release of package changes falls
+          # back to it when upstream's latest release is unusable (images missing, or older).
+          pinned_tag=$(sed -nE 's#^FROM ghcr.io/multica-ai/multica-backend:(v[0-9.]+)@.*#\1#p' Dockerfile)
+          pinned_backend=$(sed -nE 's#^FROM ghcr.io/multica-ai/multica-backend:v[0-9.]+@(sha256:[0-9a-f]+).*#\1#p' Dockerfile)
+          pinned_web=$(sed -nE 's#^FROM ghcr.io/multica-ai/multica-web:v[0-9.]+@(sha256:[0-9a-f]+).*#\1#p' Dockerfile)
+          use_pinned() {
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "tag=${pinned_tag}" >> "$GITHUB_OUTPUT"
+            echo "version=${pinned_tag#v}" >> "$GITHUB_OUTPUT"
+            echo "backend=${pinned_backend}" >> "$GITHUB_OUTPUT"
+            echo "web=${pinned_web}" >> "$GITHUB_OUTPUT"
+            echo "### $1; releasing package changes on the pinned Multica ${pinned_tag}" >> "$GITHUB_STEP_SUMMARY"
+          }
           tag=$(gh api repos/multica-ai/multica/releases/latest --jq .tag_name)
           [[ "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "unexpected release tag ${tag}" >&2; exit 1; }
           digest() {
@@ -64,9 +78,16 @@ jobs:
           }
           backend=$(digest multica-backend || true); web=$(digest multica-web || true)
           if [[ "${backend}" != sha256:* || "${web}" != sha256:* ]]; then
+            if [[ "${FORCE}" == true ]]; then use_pinned "Images for Multica ${tag} are not published yet"; exit 0; fi
             # Upstream publishes the release before its images; the next scheduled run retries.
             echo "ready=false" >> "$GITHUB_OUTPUT"
             echo "### Images for Multica ${tag} are not published yet; will retry" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [[ "$(printf '%s\n%s\n' "${pinned_tag#v}" "${tag#v}" | sort -V | tail -1)" != "${tag#v}" ]]; then
+            if [[ "${FORCE}" == true ]]; then use_pinned "Latest release ${tag} is older than the pinned ${pinned_tag}"; exit 0; fi
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "### Latest release ${tag} is older than the packaged ${pinned_tag}; nothing to do" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           echo "ready=true" >> "$GITHUB_OUTPUT"
@@ -150,8 +171,8 @@ jobs:
       - name: Lint
         if: steps.plan.outputs.release == 'true'
         run: |
-          bash -n start.sh app-env.sh backend.sh test/smoke.sh test/upgrade.sh
-          shellcheck -S warning start.sh app-env.sh backend.sh test/smoke.sh test/upgrade.sh
+          bash -n start.sh app-env.sh backend.sh web.sh test/smoke.sh test/upgrade.sh
+          shellcheck -S warning start.sh app-env.sh backend.sh web.sh test/smoke.sh test/upgrade.sh
           jq empty CloudronManifest.json CloudronVersions.json
 
       - name: Set up Docker Buildx

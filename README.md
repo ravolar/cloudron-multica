@@ -61,7 +61,9 @@ invite any address. Once your workspaces exist, set `DISABLE_WORKSPACE_CREATION=
 only owners and admins of existing workspaces can bring in new people.
 
 Code requests and code attempts are rate-limited per client address (upstream's limits, which need
-the Redis addon); a code is valid for 10 minutes and for 5 attempts.
+the Redis addon); a code is valid for 10 minutes and for 5 attempts. Redis holds only short-lived
+data (rate-limit counters, caches, the realtime event relay); if it is unavailable, Multica keeps
+working, with slower writes until it is back.
 
 Google sign-in: create an OAuth client with the redirect URI `https://<app domain>/auth/callback`
 and set `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` in `env.sh`.
@@ -93,8 +95,11 @@ and the app does not start; the log names the offending lines.
 Set by the package on every start (values in `env.sh` are ignored): `DATABASE_URL`, the public URLs
 and allowed origins (`FRONTEND_ORIGIN`, `CORS_ALLOWED_ORIGINS`, `MULTICA_APP_URL`,
 `MULTICA_PUBLIC_URL`, `MULTICA_DAEMON_SERVER_URL`, `GOOGLE_REDIRECT_URI`), the `SMTP_*` settings,
-`LOCAL_UPLOAD_DIR`, `MULTICA_TRUSTED_PROXIES`, `COOKIE_DOMAIN` (empty), `DO_NOT_TRACK` and
-`ANALYTICS_DISABLED` (telemetry off), `MULTICA_CLOUD_URL` (empty: no managed-cloud features).
+`LOCAL_UPLOAD_DIR`, `REDIS_URL`, `MULTICA_TRUSTED_PROXIES`, `RATE_LIMIT_TRUSTED_PROXIES`,
+`APP_ENV`, `COOKIE_DOMAIN` (empty), `MULTICA_DEV_VERIFICATION_CODE` (empty), `DO_NOT_TRACK` and
+`ANALYTICS_DISABLED` (telemetry off), `MULTICA_CLOUD_URL` (empty: no managed-cloud features),
+`HOME`, `TMPDIR`, and the three generated secrets (see below). The log names any of these found
+in `env.sh` as ignored.
 
 Everything else from upstream's [`.env.example`](https://github.com/multica-ai/multica/blob/main/.env.example)
 can be set in `env.sh`: sign-up controls, Google sign-in, the GitHub App, Slack / Telegram / Lark /
@@ -189,10 +194,11 @@ database; restore, clone and import work as for any app.
 3. In the app: stop the backend (`supervisorctl stop backend`), replace the empty database
    (`DROP SCHEMA public CASCADE; CREATE SCHEMA public;` with `psql "$CLOUDRON_POSTGRESQL_URL"`) and
    load the dump.
-4. Copy the old uploads into `/app/data/uploads` and put the old `JWT_SECRET` and
-   `MULTICA_VCS_SECRET_KEY` (and any `MULTICA_*_SECRET_KEY` you used) into
-   `/app/data/.secrets/secrets.env` / `env.sh`; otherwise users sign in again and stored
-   integration tokens must be re-entered.
+4. Copy the old uploads into `/app/data/uploads`. Put the old `JWT_SECRET`,
+   `MULTICA_VCS_SECRET_KEY` and `MULTICA_PLUGIN_SECRET_KEY` into `/app/data/.secrets/secrets.env`
+   (replacing the generated values; `NAME="value"` lines only), and any other
+   `MULTICA_*_SECRET_KEY` you used (Slack, Telegram, ...) into `env.sh`. Otherwise users sign in
+   again and stored integration tokens and plugin secrets must be re-entered.
 5. Restart: Multica migrates the schema to its version. Move the app to its final domain and point
    the daemons at the new URL.
 

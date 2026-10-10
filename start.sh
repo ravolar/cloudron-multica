@@ -105,20 +105,6 @@ fi
 
 # Secrets are generated on first run only. When migrating an existing Multica, replace them with
 # the old installation's values before the first start against the imported database.
-# Each secret is generated once, when missing (newer package versions may add keys).
-( umask 077; touch "${SECRETS}" )
-chown root:root "${SECRETS}"
-chmod 600 "${SECRETS}"
-add_secret() {
-    if ! grep -q "^$1=" "${SECRETS}"; then
-        echo "==> Generating $1"
-        printf '%s="%s"\n' "$1" "$2" >> "${SECRETS}"
-    fi
-}
-add_secret JWT_SECRET "$(openssl rand -hex 32)"
-add_secret MULTICA_VCS_SECRET_KEY "$(openssl rand -base64 32)"
-add_secret MULTICA_PLUGIN_SECRET_KEY "$(openssl rand -base64 32)"
-
 # Both files may only contain plain assignments: NAME="value" or NAME='value', no $, backticks or
 # backslashes inside double quotes, no "export", no leading spaces. env.sh is later sourced by the
 # app user; anything that could run a command is refused.
@@ -148,9 +134,29 @@ check_env_file() {
     fi
 }
 
+# Each secret is generated once, when missing (newer package versions may add keys). The file is
+# validated first: a hand-edited line the validator would reject (e.g. "export JWT_SECRET=...")
+# must stop the start, not make add_secret append a second, different key that then wins.
+( umask 077; touch "${SECRETS}" )
+chown root:root "${SECRETS}"
+chmod 600 "${SECRETS}"
+if ! check_env_file "${SECRETS}"; then
+    sleep 30
+    exit 1
+fi
+add_secret() {
+    if ! grep -qE "^[[:blank:]]*(export[[:blank:]]+)?$1=" "${SECRETS}"; then
+        echo "==> Generating $1"
+        printf '%s="%s"\n' "$1" "$2" >> "${SECRETS}"
+    fi
+}
+add_secret JWT_SECRET "$(openssl rand -hex 32)"
+add_secret MULTICA_VCS_SECRET_KEY "$(openssl rand -base64 32)"
+add_secret MULTICA_PLUGIN_SECRET_KEY "$(openssl rand -base64 32)"
+
 chown root:cloudron /app/data/env.sh
 chmod 640 /app/data/env.sh
-if ! check_env_file /app/data/env.sh || ! check_env_file "${SECRETS}"; then
+if ! check_env_file /app/data/env.sh; then
     sleep 30
     exit 1
 fi
@@ -197,7 +203,13 @@ export MULTICA_TRUSTED_PROXIES="127.0.0.1/32"
 export RATE_LIMIT_TRUSTED_PROXIES="127.0.0.1/32"
 # Redis (Cloudron addon): upstream's rate limits on sign-in (code requests and attempts per IP)
 # only work with Redis.
-export REDIS_URL="${CLOUDRON_REDIS_URL:-}"
+# Bounded timeouts: upstream publishes realtime events to Redis inside the request, so a Redis that
+# is down (e.g. its addon restarting on its own) would otherwise stall writes for seconds each.
+if [[ -n "${CLOUDRON_REDIS_URL:-}" ]]; then
+    export REDIS_URL="${CLOUDRON_REDIS_URL}?dial_timeout=2s&max_retries=1"
+else
+    export REDIS_URL=""
+fi
 # No telemetry, no managed-cloud features, no cookie sharing with sibling subdomains.
 export DO_NOT_TRACK=1
 export ANALYTICS_DISABLED=true
@@ -253,6 +265,16 @@ printf 'set_real_ip_from %s;\n' "${proxy_ip}" > /run/multica/nginx-http.conf
 chmod 644 /run/multica/nginx-http.conf
 
 # Warnings only: read the values as text, without evaluating env.sh.
+for name in "${derived[@]}"; do
+    if grep -qE "^${name}=" /app/data/env.sh; then
+        case "${name}" in
+            JWT_SECRET|MULTICA_*_SECRET_KEY)
+                echo "==> NOTE: ${name} in /app/data/env.sh is ignored: put it in /app/data/.secrets/secrets.env." ;;
+            *)
+                echo "==> NOTE: ${name} in /app/data/env.sh is ignored: it is set by the package." ;;
+        esac
+    fi
+done
 if [[ -z "$(env_value ALLOWED_EMAILS)" && -z "$(env_value ALLOWED_EMAIL_DOMAINS)" && "$(env_value ALLOW_SIGNUP)" != true ]]; then
     echo "==> NOTE: nobody can sign up yet. Set ALLOWED_EMAILS (or ALLOWED_EMAIL_DOMAINS) in /app/data/env.sh and restart."
 fi
