@@ -22,7 +22,7 @@ WORK=$(mktemp -d)
 FAILED=0
 
 cleanup() {
-    docker rm -f "${ID}-app" "${ID}-pg" >/dev/null 2>&1 || true
+    docker rm -f "${ID}-app" "${ID}-pg" "${ID}-redis" >/dev/null 2>&1 || true
     docker volume rm "${ID}-run" "${ID}-tmp" "${ID}-next" >/dev/null 2>&1 || true
     docker network rm "${ID}" >/dev/null 2>&1 || true
     # the data dir is root-owned after start.sh ran; remove it from a container
@@ -47,6 +47,7 @@ start_app() {
         -e CLOUDRON_POSTGRESQL_HOST="${ID}-pg" -e CLOUDRON_POSTGRESQL_PORT=5432 \
         -e CLOUDRON_POSTGRESQL_USERNAME=multicauser -e CLOUDRON_POSTGRESQL_PASSWORD='p+w/d=1' \
         -e CLOUDRON_POSTGRESQL_DATABASE=multicadb \
+        -e CLOUDRON_REDIS_URL="redis://default:redispw@${ID}-redis:6379" \
         "$1" >/dev/null
 }
 
@@ -76,13 +77,19 @@ daemon_ws_status() {
         -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' "${ORIGIN}/api/daemon/ws" || true
 }
 
-secrets_sum() { app_exec sha256sum /app/data/.secrets/secrets.env /app/data/env.sh; }
+# Fingerprint of the settings and of the secrets that existed before the update (newer package
+# versions may append new keys, but must never change existing ones). Nothing is printed.
+secrets_sum() {
+    app_exec sh -c 'sha256sum /app/data/env.sh; grep -E "^(JWT_SECRET|MULTICA_VCS_SECRET_KEY)=" /app/data/.secrets/secrets.env | sha256sum'
+}
 
 echo "==> Old version: ${OLD_IMAGE}"
 docker network create "${ID}" >/dev/null
 docker run -d --name "${ID}-pg" --network "${ID}" \
     -e POSTGRES_USER=multicauser -e POSTGRES_PASSWORD='p+w/d=1' -e POSTGRES_DB=multicadb \
     "${PG_IMAGE}" >/dev/null
+# Redis like Cloudron's addon (per-app instance with a password).
+docker run -d --name "${ID}-redis" --network "${ID}" redis:7-alpine redis-server --requirepass redispw >/dev/null
 for _ in $(seq 1 60); do
     docker exec "${ID}-pg" pg_isready -q -U multicauser -d multicadb >/dev/null 2>&1 && break
     sleep 1

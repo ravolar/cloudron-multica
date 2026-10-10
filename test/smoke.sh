@@ -20,7 +20,7 @@ WORK=$(mktemp -d)
 FAILED=0
 
 cleanup() {
-    docker rm -f "${ID}-app" "${ID}-pg" >/dev/null 2>&1 || true
+    docker rm -f "${ID}-app" "${ID}-pg" "${ID}-redis" >/dev/null 2>&1 || true
     docker volume rm "${ID}-run" "${ID}-tmp" "${ID}-next" >/dev/null 2>&1 || true
     docker network rm "${ID}" >/dev/null 2>&1 || true
     # the data dir is root-owned after start.sh ran; remove it from a container
@@ -34,6 +34,12 @@ fail() { echo "  FAIL  $1"; FAILED=1; }
 check() { local name=$1; shift; if "$@" >/dev/null 2>&1; then pass "${name}"; else fail "${name}"; fi; }
 no_match() { ! grep -qE "$1" <<<"$2"; }
 app_exec() { docker exec "${ID}-app" "$@"; }
+# Reads the Next.js process environment as its own user (root may not read other users' environ).
+web_env_clean() {
+    local env
+    env=$(docker exec -u cloudron "${ID}-app" bash -c 'tr "\0" "\n" < "/proc/$(pgrep -f "^next-server" | head -1)/environ"')
+    grep -q '^REMOTE_API_URL=' <<<"${env}" && ! grep -qE '^(JWT_SECRET|DATABASE_URL|SMTP_PASSWORD|MULTICA_[A-Z_]*SECRET_KEY|REDIS_URL)=' <<<"${env}"
+}
 status() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
 
 echo "==> Starting PostgreSQL (${PG_IMAGE})"
@@ -41,6 +47,8 @@ docker network create "${ID}" >/dev/null
 docker run -d --name "${ID}-pg" --network "${ID}" \
     -e POSTGRES_USER=multicauser -e POSTGRES_PASSWORD='p+w/d=1' -e POSTGRES_DB=multicadb \
     "${PG_IMAGE}" >/dev/null
+# Redis like Cloudron's addon (per-app instance with a password).
+docker run -d --name "${ID}-redis" --network "${ID}" redis:7-alpine redis-server --requirepass redispw >/dev/null
 for _ in $(seq 1 60); do
     docker exec "${ID}-pg" pg_isready -q -U multicauser -d multicadb >/dev/null 2>&1 && break
     sleep 1
@@ -50,8 +58,10 @@ sleep 2
 mkdir -p "${WORK}/data"
 # The operator's first edit (POSTINSTALL): allow one address. Written before the first start, so
 # start.sh keeps it instead of writing the template.
+# ALLOW_SIGNUP="no" must not open sign-up (upstream only closes on exactly "false").
 cat > "${WORK}/data/env.sh" <<EOF
 ALLOWED_EMAILS="${EMAIL}"
+ALLOW_SIGNUP="no"
 EOF
 
 start_app() {
@@ -64,6 +74,7 @@ start_app() {
         -e CLOUDRON_POSTGRESQL_HOST="${ID}-pg" -e CLOUDRON_POSTGRESQL_PORT=5432 \
         -e CLOUDRON_POSTGRESQL_USERNAME=multicauser -e CLOUDRON_POSTGRESQL_PASSWORD='p+w/d=1' \
         -e CLOUDRON_POSTGRESQL_DATABASE=multicadb \
+        -e CLOUDRON_REDIS_URL="redis://default:redispw@${ID}-redis:6379" \
         "${IMAGE}" >/dev/null
 }
 
@@ -98,6 +109,8 @@ run_checks() {
     check "app user cannot write env.sh" bash -c "! docker exec -u cloudron ${ID}-app sh -c 'echo x >> /app/data/env.sh'"
     check "uploads owned by the app user" test "$(app_exec stat -c %U /app/data/uploads)" = "cloudron"
     check "supervisor does not carry addon credentials" bash -c "! docker exec ${ID}-app cat /proc/1/environ | tr '\\\\0' '\\\\n' | grep -qE '^(CLOUDRON_POSTGRESQL_PASSWORD|JWT_SECRET|DATABASE_URL)='"
+    check "web process does not get the backend's secrets" web_env_clean
+    check "sign-in rate limiting active (Redis)" bash -c "! grep -q 'auth rate limiting disabled' <<<\"\$1\"" _ "${logs}"
     check "Multica processes run as the app user (uid 1000)" test "$(app_exec bash -c 'for p in /proc/[0-9]*; do case "$(cat "$p/comm" 2>/dev/null)" in server|node|next-server*|nginx) awk "/^Uid:/{print \$2}" "$p/status";; esac; done | sort -u | tr -d "\n"')" = "1000"
 }
 
@@ -126,7 +139,9 @@ check "agent daemon WebSocket upgrades with the token (/api/daemon/ws)" test "$(
     -H "Authorization: Bearer ${pat}" -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' \
     -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' "${ORIGIN}/api/daemon/ws" || true)" = 101
 curl -s -X POST -H 'Content-Type: application/json' -d '{"email":"stranger@example.org"}' "${ORIGIN}/auth/send-code" >/dev/null
-check "other addresses cannot sign up" no_match "Verification code for stranger@example.org" "$(docker logs "${ID}-app" 2>&1)"
+check "other addresses cannot sign up (ALLOW_SIGNUP=\"no\" stays closed)" no_match "Verification code for stranger@example.org" "$(docker logs "${ID}-app" 2>&1)"
+codes=$(for _ in $(seq 1 8); do status -X POST -H 'Content-Type: application/json' -d "{\"email\":\"${EMAIL}\"}" "${ORIGIN}/auth/send-code"; echo; done)
+check "code requests are rate-limited per client" grep -q 429 <<<"${codes}"
 
 echo "==> Restart"
 docker restart "${ID}-app" >/dev/null

@@ -17,8 +17,13 @@ source /run/multica/multica.env
 set +o allexport
 set -u
 
-# Sign-up is closed unless env.sh opens it: only ALLOWED_EMAILS / ALLOWED_EMAIL_DOMAINS and
-# invited addresses can create an account.
-export ALLOW_SIGNUP="${ALLOW_SIGNUP:-false}"
+# Sign-up is closed unless env.sh sets ALLOW_SIGNUP="true": only ALLOWED_EMAILS /
+# ALLOWED_EMAIL_DOMAINS and invited addresses can create an account. Upstream treats every value
+# other than exactly "false" as open, so anything but "true" is normalised to "false".
+if [[ "${ALLOW_SIGNUP:-}" == true ]]; then
+    export ALLOW_SIGNUP=true
+else
+    export ALLOW_SIGNUP=false
+fi
 
 exec "$@"

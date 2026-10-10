@@ -29,6 +29,7 @@
   "addons": {
     "localstorage": {},
     "postgresql": {},
+    "redis": {},
     "sendmail": {}
   },
   "minBoxVersion": "10.0.0",

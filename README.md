@@ -15,7 +15,8 @@ on an issue board.
 
 * The Multica server: issue board, agents and runtimes, chat, inbox, usage dashboards, REST API,
   real-time updates over WebSockets.
-* PostgreSQL, outgoing email and file storage provided by Cloudron and configured automatically.
+* PostgreSQL, Redis (sign-in rate limits), outgoing email and file storage provided by Cloudron and
+  configured automatically.
 * Cloudron backups, restore, clone and updates. New Multica releases are packaged automatically
   after a smoke test (PostgreSQL 16 and 18) and an upgrade test with real data.
 
@@ -51,9 +52,16 @@ Multica signs users in with a one-time code sent by email (or with Google, if co
 is **no generic OpenID Connect**, so neither Cloudron user management nor another identity
 provider can be used; the app does not use Cloudron's user directory.
 
-Sign-up is closed by default (`ALLOW_SIGNUP="false"`): only addresses in `ALLOWED_EMAILS`, domains
-in `ALLOWED_EMAIL_DOMAINS` and people invited to a workspace can create an account. Existing users
-can always sign in.
+Sign-up is closed by default (`ALLOW_SIGNUP="false"`; any value other than `"true"` counts as
+closed): only addresses in `ALLOWED_EMAILS`, domains in `ALLOWED_EMAIL_DOMAINS` and people invited
+to a workspace can create an account. Existing users can always sign in.
+
+**Invitations bypass the lists**, and by default every signed-in user can create a workspace and
+invite any address. Once your workspaces exist, set `DISABLE_WORKSPACE_CREATION="true"` so that
+only owners and admins of existing workspaces can bring in new people.
+
+Code requests and code attempts are rate-limited per client address (upstream's limits, which need
+the Redis addon); a code is valid for 10 minutes and for 5 attempts.
 
 Google sign-in: create an OAuth client with the redirect URI `https://<app domain>/auth/callback`
 and set `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` in `env.sh`.
@@ -93,11 +101,20 @@ can be set in `env.sh`: sign-up controls, Google sign-in, the GitHub App, Slack 
 DingTalk / WeCom bots (each enabled by its `MULTICA_*_SECRET_KEY`, a base64-encoded 32-byte key:
 `openssl rand -base64 32`), the server-side LLM helpers.
 
+**Self-hosted Forgejo / Gitea / GitLab** is off by default. `MULTICA_VCS_INTEGRATION_ENABLED="true"`
+turns it on; its encryption key is already generated. When on, a workspace owner or admin enters
+the address of their Git server and the Multica server sends requests to it. Upstream does not
+restrict that address, so a workspace owner could point it at hosts on the Cloudron's internal
+network. Enable it only if you trust every workspace owner, together with
+`DISABLE_WORKSPACE_CREATION="true"`. (Plugins and remote MCP servers, by contrast, only reach
+public HTTPS addresses.)
+
 ### Secrets
 
-`JWT_SECRET` (sessions) and `MULTICA_VCS_SECRET_KEY` (encrypts Forgejo / Gitea / GitLab access
-tokens) are generated on first start into `/app/data/.secrets/secrets.env` (root-only) and never
-regenerated. They are part of the app's backup.
+`JWT_SECRET` (sessions), `MULTICA_VCS_SECRET_KEY` (encrypts Forgejo / Gitea / GitLab access
+tokens) and `MULTICA_PLUGIN_SECRET_KEY` (encrypts plugin secrets) are generated into
+`/app/data/.secrets/secrets.env` (root-only) when missing and never changed afterwards. They are
+part of the app's backup.
 
 ### Email
 
@@ -105,7 +122,8 @@ Sign-in codes and invitations go through Cloudron's mail server on its internal 
 Multica refuses to send SMTP credentials over an unencrypted connection, and the certificate of
 that port is issued for the Cloudron dashboard domain rather than the internal host name, so
 certificate verification is disabled for this internal connection (it stays encrypted). If
-outbound email is disabled for the app, sign-in codes cannot be delivered.
+outbound email is disabled for the app, Multica writes sign-in codes to the app's log instead: the
+log then works as a credential.
 
 ### Files
 
@@ -120,12 +138,14 @@ can be configured with upstream's `S3_*` variables instead.
   every start, and symlinks in place of these files make the app refuse to start. Operator
   settings are loaded by `app-env.sh` as the app user, right before each process starts.
 * **Clean environments.** Supervisor starts with an empty environment, so Cloudron's addon
-  credentials and the package's secrets reach only the app processes (through `app-env.sh`).
+  credentials and the package's secrets reach only the backend (through `app-env.sh`). The web app
+  (`web.sh`) gets only the handful of settings it reads, none of them secret.
 * **Ports.** nginx owns the public port 8000; the web app listens on `127.0.0.1:3000`. The Go
   backend listens on port 8080 on all interfaces (upstream offers no bind address), which other
   containers on the Cloudron network can reach; it is the same API that is public anyway, and it
   trusts forwarded client addresses only from `127.0.0.1` (the local nginx). nginx takes the
-  client address from Cloudron's reverse proxy only (`CLOUDRON_PROXY_IP`).
+  client address from Cloudron's reverse proxy only (`CLOUDRON_PROXY_IP`). The same applies to the
+  sign-in rate limits (`RATE_LIMIT_TRUSTED_PROXIES`).
 * Readiness and metrics endpoints (`/readyz`, `/healthz`, `/metrics`) are not served publicly.
 * **Telemetry off**: `DO_NOT_TRACK=1`, `ANALYTICS_DISABLED=true`.
 * **Sensitive data.** Agents' custom environment (for example `ANTHROPIC_API_KEY`) is stored by
@@ -187,9 +207,8 @@ The old installation must not be newer than the package's Multica version.
   of the same version is added and checked by encoding an image at build time.
 * `start.sh` (root) secures `/app/data`, generates secrets on first start, validates `env.sh`,
   derives the platform settings and starts supervisor.
-* Supervisor runs `backend.sh` (`migrate up`, then the API server on 8080), the web app
-  (`node apps/web/server.js` on `127.0.0.1:3000`) and nginx (port 8000), all as the `cloudron`
-  user via `app-env.sh`. nginx implements upstream's same-origin layout: `/ws`, `/api/daemon/ws`,
+* Supervisor runs `backend.sh` (`migrate up`, then the API server on 8080), `web.sh` (the Next.js
+  app on `127.0.0.1:3000`) and nginx (port 8000), all as the `cloudron` user via `app-env.sh`. nginx implements upstream's same-origin layout: `/ws`, `/api/daemon/ws`,
   `/api/`, `/v1/`, `/uploads/`, `/health` and `/auth/*` (except the web app's OAuth callback pages)
   go to the backend, everything else to the web app.
 
@@ -204,8 +223,9 @@ cloudron install --location multica.example.com
 * `test/smoke.sh <image>` runs an image the way Cloudron does (read-only root filesystem, data,
   runtime and `.next` volumes) next to PostgreSQL (`PG_IMAGE`, default 16) and checks start-up,
   migrations, routing (web, API, WebSocket), a real email-code sign-in, a personal access token and
-  the daemon WebSocket upgrade, sign-up restrictions, file ownership, process users, the absence of
-  credentials in supervisor's environment and a restart.
+  the daemon WebSocket upgrade, sign-up restrictions (including a non-boolean `ALLOW_SIGNUP`), the
+  sign-in rate limit (with Redis), file ownership, process users, the absence of credentials in
+  supervisor's and the web app's environment, and a restart.
 * `test/upgrade.sh <old image> <new image>` does what a Cloudron update does: it creates an
   account, a workspace, an issue, an uploaded file and a token on the old image, replaces the
   container with the new one on the same data and database, and checks that all of it survived.
@@ -221,7 +241,8 @@ CHANGELOG entry, builds, runs both smoke tests and the upgrade test, and only th
 `ghcr.io/ravolar/cloudron-multica:X.Y.Z`, adds it to `CloudronVersions.json` as published, commits
 and tags `vX.Y.Z`. To release package changes without a new Multica version, run it by hand with
 *release package changes* ticked and a CHANGELOG line in *notes*. If any step fails, nothing is
-published and the run opens a GitHub issue.
+published and the run opens a GitHub issue. A release whose images are not on GHCR yet is skipped
+until a later run.
 
 Repository settings needed once: Actions → General → Workflow permissions **Read and write**; the
 GHCR package must be public.

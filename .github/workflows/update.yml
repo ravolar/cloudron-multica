@@ -62,8 +62,14 @@ jobs:
               "https://ghcr.io/v2/multica-ai/${repo}/manifests/${tag}" \
               | tr -d '\r' | awk -F': ' 'tolower($1)=="docker-content-digest"{print $2}'
           }
-          backend=$(digest multica-backend); web=$(digest multica-web)
-          [[ "${backend}" == sha256:* && "${web}" == sha256:* ]] || { echo "could not resolve the ${tag} image digests (not published yet?)" >&2; exit 1; }
+          backend=$(digest multica-backend || true); web=$(digest multica-web || true)
+          if [[ "${backend}" != sha256:* || "${web}" != sha256:* ]]; then
+            # Upstream publishes the release before its images; the next scheduled run retries.
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "### Images for Multica ${tag} are not published yet; will retry" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "ready=true" >> "$GITHUB_OUTPUT"
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
           echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
           echo "backend=${backend}" >> "$GITHUB_OUTPUT"
@@ -71,6 +77,7 @@ jobs:
 
       - name: Decide whether to release
         id: plan
+        if: steps.upstream.outputs.ready == 'true'
         env:
           TAG: ${{ steps.upstream.outputs.tag }}
           VERSION: ${{ steps.upstream.outputs.version }}
@@ -80,7 +87,10 @@ jobs:
         run: |
           current=$(jq -r .upstreamVersion CloudronManifest.json)
           if [[ "$(printf '%s\n%s\n' "${current}" "${VERSION}" | sort -V | tail -1)" != "${VERSION}" ]]; then
-            echo "latest release ${VERSION} is older than the pinned ${current}" >&2; exit 1
+            # e.g. upstream marked an older release as latest again: never downgrade, nothing to do.
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "### Latest release ${VERSION} is older than the packaged ${current}; nothing to do" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
           fi
           sed -i -E \
             -e "s#ghcr.io/multica-ai/multica-backend:v[0-9.]+@sha256:[0-9a-f]+#ghcr.io/multica-ai/multica-backend:${TAG}@${BACKEND}#" \

@@ -52,11 +52,11 @@ RUN sed -e 's,^logfile=.*$,logfile=/run/supervisord.log,' \
         -e 's,^\[supervisord\]$,[supervisord]\nuser=root,' \
         -i /etc/supervisor/supervisord.conf
 
-COPY start.sh app-env.sh backend.sh nginx.conf /app/pkg/
+COPY start.sh app-env.sh backend.sh web.sh nginx.conf /app/pkg/
 COPY supervisor/ /etc/supervisor/conf.d/
 # Set modes explicitly: the build context can arrive with 0600 files (seen with Cloudron's
 # on-server build), and the processes run as `cloudron`.
-RUN chmod 0755 /app/pkg /app/pkg/start.sh /app/pkg/app-env.sh /app/pkg/backend.sh \
+RUN chmod 0755 /app/pkg /app/pkg/start.sh /app/pkg/app-env.sh /app/pkg/backend.sh /app/pkg/web.sh \
     && chmod 0644 /app/pkg/nginx.conf /etc/supervisor/conf.d/*.conf
 
 RUN mkdir -p /run/multica/nginx \
