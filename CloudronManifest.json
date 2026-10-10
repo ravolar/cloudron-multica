@@ -1,0 +1,36 @@
+{
+  "manifestVersion": 2,
+  "id": "io.github.ravolar.multica",
+  "title": "Multica",
+  "tagline": "Coding agents as teammates: assign issues, track progress",
+  "description": "file://DESCRIPTION.md",
+  "changelog": "file://CHANGELOG",
+  "postInstallMessage": "file://POSTINSTALL.md",
+  "version": "0.1.0",
+  "upstreamVersion": "0.6.1",
+  "website": "https://multica.ai",
+  "documentationUrl": "https://github.com/multica-ai/multica/blob/main/SELF_HOSTING.md",
+  "packagerName": "ravolar",
+  "packagerUrl": "https://github.com/ravolar/cloudron-multica",
+  "iconUrl": "https://raw.githubusercontent.com/ravolar/cloudron-multica/main/logo.png",
+  "icon": "file://logo.png",
+  "tags": [
+    "project-management",
+    "ai",
+    "agents",
+    "developer"
+  ],
+  "httpPort": 8000,
+  "healthCheckPath": "/health",
+  "memoryLimit": 1610612736,
+  "runtimeDirs": [
+    "/app/code/web/apps/web/.next"
+  ],
+  "addons": {
+    "localstorage": {},
+    "postgresql": {},
+    "sendmail": {}
+  },
+  "minBoxVersion": "10.0.0",
+  "packageUrl": "https://github.com/ravolar/cloudron-multica"
+}
