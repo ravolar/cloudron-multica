@@ -1,3 +1,5 @@
+This is an **unofficial community package**, not affiliated with or supported by Index Labs (Hong Kong) Limited or the Multica project.
+
 Multica turns coding agents (Claude Code, Codex, Copilot, OpenCode and more) into teammates:
 assign issues on a board, and agents running on your own machines pick them up, work on them,
 report progress and blockers, and build up reusable skills.

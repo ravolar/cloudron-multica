@@ -4,6 +4,8 @@ A [Cloudron](https://www.cloudron.io) community package for [Multica](https://mu
 platform that turns coding agents (Claude Code, Codex, Copilot, OpenCode and more) into teammates
 on an issue board.
 
+This is an **unofficial** package, not affiliated with or supported by Index Labs (Hong Kong) Limited or the Multica project.
+
 | | |
 |---|---|
 | Package | `io.github.ravolar.multica` |
@@ -252,6 +254,21 @@ until a later run.
 
 Repository settings needed once: Actions → General → Workflow permissions **Read and write**; the
 GHCR package must be public.
+
+## Support
+
+This is an unofficial package, maintained on a best-effort basis by its author, who runs it in
+production. There is no guaranteed response time and no warranty (see the license).
+
+* **Package problems** (installation, configuration, updates, the package's scripts): open an
+  issue in this repository with the app's version (app → Updates), what you did, and the relevant
+  lines of the app's log (remove personal data and secrets).
+* **Security issues in the package**: please report them privately through GitHub (Security →
+  Report a vulnerability), not in a public issue.
+* **Bugs or features of Multica itself**: report them upstream at <https://github.com/multica-ai/multica>. Upstream releases reach
+  this package automatically after the tests described in [Development and releasing](#development-and-releasing).
+* Questions and discussion: the [Cloudron forum](https://forum.cloudron.io)
+  (community apps category).
 
 ## License
 
