@@ -56,7 +56,8 @@ wait_ready() {
         if [[ "$(status "${ORIGIN}/health")" == 200 && "$(status "${ORIGIN}/login")" == 200 ]]; then
             return 0
         fi
-        if docker logs "${ID}-app" 2>&1 | grep -qE "Refusing to start|==> ERROR"; then
+        logs=$(docker logs "${ID}-app" 2>&1)
+        if grep -qE "Refusing to start|==> ERROR" <<<"${logs}"; then
             return 1
         fi
         sleep 2
