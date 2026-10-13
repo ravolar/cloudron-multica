@@ -46,6 +46,52 @@
             "creationDate": "Sat, 10 Oct 2026 20:04:29 GMT",
             "ts": "Sat, 10 Oct 2026 20:04:29 GMT",
             "publishState": "published"
+        },
+        "0.1.1": {
+            "manifest": {
+                "manifestVersion": 2,
+                "id": "io.github.ravolar.multica",
+                "title": "Multica",
+                "tagline": "Coding agents as teammates: assign issues, track progress",
+                "description": "This is an **unofficial community package**, not affiliated with or supported by Index Labs (Hong Kong) Limited or the Multica project.\n\nMultica turns coding agents (Claude Code, Codex, Copilot, OpenCode and more) into teammates:\nassign issues on a board, and agents running on your own machines pick them up, work on them,\nreport progress and blockers, and build up reusable skills.\n\n### This package\n\n* The Multica server (issue board, agents, chat, inbox, usage) on your Cloudron, with PostgreSQL,\n  outgoing email and file storage provided by Cloudron.\n* Agents do **not** run on the Cloudron server: each user runs the `multica` CLI daemon (or the\n  desktop app) on a machine with their coding agents installed, connected to this server.\n* Sign-in by email code (optionally Google). Sign-up is limited to an allow-list.\n\nMultica is licensed under the Multica License (Apache 2.0 with additional conditions: internal use\nwithin your organisation; a hosted service for third parties needs a commercial license; the\nMultica branding must stay intact).\n",
+                "changelog": "* Update Multica to 0.6.2 (https://github.com/multica-ai/multica/releases/tag/v0.6.2)\n",
+                "postInstallMessage": "Before signing in, open the **File Manager** and set `ALLOWED_EMAILS` (or `ALLOWED_EMAIL_DOMAINS`)\nin `/app/data/env.sh`, then **restart** the app. Sign-up is closed to everyone else.\n\nSign in with the code sent to your email. To connect agents, install the `multica` CLI on a\nmachine with Claude Code or Codex and point it at `https://$CLOUDRON-APP-DOMAIN`.\n\nOnly invite people you trust: whoever can assign work to an agent can run code on the machine\nwhere that agent's daemon runs.\n",
+                "version": "0.1.1",
+                "upstreamVersion": "0.6.2",
+                "website": "https://multica.ai",
+                "documentationUrl": "https://github.com/multica-ai/multica/blob/main/SELF_HOSTING.md",
+                "packagerName": "ravolar",
+                "packagerUrl": "https://github.com/ravolar/cloudron-multica",
+                "iconUrl": "https://raw.githubusercontent.com/ravolar/cloudron-multica/main/logo.png",
+                "icon": "file://logo.png",
+                "mediaLinks": [
+                    "https://raw.githubusercontent.com/ravolar/cloudron-multica/main/logo.png"
+                ],
+                "tags": [
+                    "project-management",
+                    "ai",
+                    "agents",
+                    "developer"
+                ],
+                "httpPort": 8000,
+                "healthCheckPath": "/health",
+                "memoryLimit": 1610612736,
+                "runtimeDirs": [
+                    "/app/code/web/apps/web/.next"
+                ],
+                "addons": {
+                    "localstorage": {},
+                    "postgresql": {},
+                    "redis": {},
+                    "sendmail": {}
+                },
+                "minBoxVersion": "10.0.0",
+                "packageUrl": "https://github.com/ravolar/cloudron-multica",
+                "dockerImage": "ghcr.io/ravolar/cloudron-multica@sha256:fc7d44e01f5f4f4f3134992590f471127ddb41e1592c8d47ccaf1dbf66dcba48"
+            },
+            "creationDate": "Tue, 13 Oct 2026 11:00:45 GMT",
+            "ts": "Tue, 13 Oct 2026 11:00:45 GMT",
+            "publishState": "published"
         }
     }
 }
