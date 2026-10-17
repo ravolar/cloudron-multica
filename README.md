@@ -13,6 +13,18 @@ This is an **unofficial** package, not affiliated with or supported by Index Lab
 | Install URL | `https://raw.githubusercontent.com/ravolar/cloudron-multica/main/CloudronVersions.json` |
 | Image | `ghcr.io/ravolar/cloudron-multica` |
 
+## Install (no CLI needed)
+
+In your Cloudron dashboard open **App Store → Add custom app → Community app**, paste this URL and
+click **Install**:
+
+```
+https://raw.githubusercontent.com/ravolar/cloudron-multica/main/CloudronVersions.json
+```
+
+New versions then show up in the dashboard (app → **Updates**), like App Store apps. First steps
+after installing: [Installation](#installation).
+
 ## What you get
 
 * The Multica server: issue board, agents and runtimes, chat, inbox, usage dashboards, REST API,
@@ -40,7 +52,7 @@ server stores and dispatches work; it never executes agent code.
    https://raw.githubusercontent.com/ravolar/cloudron-multica/main/CloudronVersions.json
    ```
 
-   (CLI: `cloudron install --versions-url <url> --location multica.example.com`)
+   (Optional, with the Cloudron CLI instead: `cloudron install --versions-url <url> --location multica.example.com`)
 2. Open the app's **File Manager**, set `ALLOWED_EMAILS` (or `ALLOWED_EMAIL_DOMAINS`) in
    `/app/data/env.sh` and **restart** the app. Until then nobody can sign up.
 3. Sign in with the code sent to your email.
