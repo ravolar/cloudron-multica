@@ -8,8 +8,8 @@
 #   web      ghcr.io/multica-ai/multica-web      Next.js standalone (Alpine), 127.0.0.1:3000
 #   nginx    port 8000 (public): WebSockets and API paths to the backend, the rest to the web app
 
-FROM ghcr.io/multica-ai/multica-backend:v0.7.1@sha256:36dd6d2325b5bb6b6873ef7ee19e0a15a084832771a68bdc2b50b0990a6eba38 AS backend
-FROM ghcr.io/multica-ai/multica-web:v0.7.1@sha256:a474b3874e2de19b9019a2b07ec07c22247ecc61f0f39fb6cf4d814504aaf316 AS web
+FROM ghcr.io/multica-ai/multica-backend:v0.7.2@sha256:29a8c3c2d3ca90d87e43058dc7317765ec11cd44e9e63d46afa01a5d23146fae AS backend
+FROM ghcr.io/multica-ai/multica-web:v0.7.2@sha256:0b4a3be703053269fe6c68a9e8a70b9248a2bfd69c85a484c0992eafa8e55f73 AS web
 
 FROM cloudron/node-base:24-20260920@sha256:d984683ec59bf2379130bf41cf3c2b6bc0453f327297d7183525cb05424e7b34
 
