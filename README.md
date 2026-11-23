@@ -29,6 +29,8 @@ after installing: [Installation](#installation).
 
 * The Multica server: issue board, agents and runtimes, chat, inbox, usage dashboards, REST API,
   real-time updates over WebSockets.
+* Upstream's collab service for live co-editing of Docs (and, optionally, issue descriptions), run
+  next to the server.
 * PostgreSQL, Redis (sign-in rate limits), outgoing email and file storage provided by Cloudron and
   configured automatically.
 * Cloudron backups, restore, clone and updates. New Multica releases are packaged automatically
@@ -112,13 +114,22 @@ and allowed origins (`FRONTEND_ORIGIN`, `CORS_ALLOWED_ORIGINS`, `MULTICA_APP_URL
 `LOCAL_UPLOAD_DIR`, `REDIS_URL`, `MULTICA_TRUSTED_PROXIES`, `RATE_LIMIT_TRUSTED_PROXIES`,
 `APP_ENV`, `COOKIE_DOMAIN` (empty), `MULTICA_DEV_VERIFICATION_CODE` (empty), `DO_NOT_TRACK` and
 `ANALYTICS_DISABLED` (telemetry off), `MULTICA_CLOUD_URL` (empty: no managed-cloud features),
-`HOME`, `TMPDIR`, and the three generated secrets (see below). The log names any of these found
+`HOME`, `TMPDIR`, `COLLAB_INTERNAL_URL`, and the generated secrets (see below). The log names any of these found
 in `env.sh` as ignored.
 
 Everything else from upstream's [`.env.example`](https://github.com/multica-ai/multica/blob/main/.env.example)
 can be set in `env.sh`: sign-up controls, Google sign-in, the GitHub App, Slack / Telegram / Lark /
 DingTalk / WeCom bots (each enabled by its `MULTICA_*_SECRET_KEY`, a base64-encoded 32-byte key:
 `openssl rand -base64 32`), the server-side LLM helpers.
+
+**Docs** (workspace wiki pages with version history, comments, and `multica doc` for agents) are
+still behind upstream's feature flag: `FF_DOCS_V1="true"` turns them on. Upstream calls them still
+in testing; turning the flag off again keeps the docs in the database but hides them. With Docs on,
+people and agents edit a doc together in real time through the bundled collab service (its shared
+`COLLAB_SECRET` is generated; open docs live in its memory and are stored through the server a few
+seconds after the last change and on shutdown). `FF_ISSUE_DESCRIPTION_LIVE="true"` additionally
+makes issue descriptions live-editable. Other upstream `FF_*` flags (`.env.example`) can be set the
+same way.
 
 **Self-hosted Forgejo / Gitea / GitLab** is off by default. `MULTICA_VCS_INTEGRATION_ENABLED="true"`
 turns it on; its encryption key is already generated. When on, a workspace owner or admin enters
@@ -131,7 +142,8 @@ public HTTPS addresses.)
 ### Secrets
 
 `JWT_SECRET` (sessions), `MULTICA_VCS_SECRET_KEY` (encrypts Forgejo / Gitea / GitLab access
-tokens) and `MULTICA_PLUGIN_SECRET_KEY` (encrypts plugin secrets) are generated into
+tokens), `MULTICA_PLUGIN_SECRET_KEY` (encrypts plugin secrets) and `COLLAB_SECRET` (shared by the
+server and the collab service) are generated into
 `/app/data/.secrets/secrets.env` (root-only) when missing and never changed afterwards. They are
 part of the app's backup.
 

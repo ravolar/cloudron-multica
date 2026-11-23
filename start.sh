@@ -153,6 +153,7 @@ add_secret() {
 add_secret JWT_SECRET "$(openssl rand -hex 32)"
 add_secret MULTICA_VCS_SECRET_KEY "$(openssl rand -base64 32)"
 add_secret MULTICA_PLUGIN_SECRET_KEY "$(openssl rand -base64 32)"
+add_secret COLLAB_SECRET "$(openssl rand -hex 32)"
 
 chown root:cloudron /app/data/env.sh
 chmod 640 /app/data/env.sh
@@ -170,7 +171,7 @@ file_value() {
     grep -E "^$2=" "$1" | tail -n 1 | cut -d= -f2- |
         sed -E "s/^\"([^\"]*)\".*/\1/; t; s/^'([^']*)'.*/\1/; t; s/[[:blank:]]+#.*$//"
 }
-for name in JWT_SECRET MULTICA_VCS_SECRET_KEY MULTICA_PLUGIN_SECRET_KEY; do
+for name in JWT_SECRET MULTICA_VCS_SECRET_KEY MULTICA_PLUGIN_SECRET_KEY COLLAB_SECRET; do
     value=$(file_value "${SECRETS}" "${name}")
     if [[ ${#value} -lt 32 ]]; then
         echo "==> ERROR: ${name} is missing or too short in ${SECRETS}. Refusing to start."
@@ -196,6 +197,9 @@ export GOOGLE_REDIRECT_URI="${CLOUDRON_APP_ORIGIN}/auth/callback"
 # Same-origin layout: the web app reaches the backend on loopback; the browser uses relative URLs.
 export REMOTE_API_URL="http://127.0.0.1:8080"
 export LOCAL_UPLOAD_DIR=/app/data/uploads
+# Live co-editing (Docs, and issue descriptions with FF_ISSUE_DESCRIPTION_LIVE) through the bundled
+# collab service. The backend only enables its /collab proxy when both are set.
+export COLLAB_INTERNAL_URL="http://127.0.0.1:8095"
 # Only the local nginx (which replaces X-Forwarded-For with the client address) is trusted, both
 # for webhooks and for the per-IP limits on sign-in (without the latter every request would count
 # as coming from nginx and one client could lock everybody out).
@@ -218,7 +222,7 @@ export COOKIE_DOMAIN=""
 export MULTICA_DEV_VERIFICATION_CODE=""
 export HOME=/run/multica/home
 export TMPDIR=/run/multica/tmp
-derived=(JWT_SECRET MULTICA_VCS_SECRET_KEY MULTICA_PLUGIN_SECRET_KEY DATABASE_URL APP_ENV FRONTEND_ORIGIN CORS_ALLOWED_ORIGINS
+derived=(JWT_SECRET MULTICA_VCS_SECRET_KEY MULTICA_PLUGIN_SECRET_KEY COLLAB_SECRET COLLAB_INTERNAL_URL DATABASE_URL APP_ENV FRONTEND_ORIGIN CORS_ALLOWED_ORIGINS
     MULTICA_APP_URL MULTICA_PUBLIC_URL MULTICA_DAEMON_SERVER_URL GOOGLE_REDIRECT_URI REMOTE_API_URL
     LOCAL_UPLOAD_DIR MULTICA_TRUSTED_PROXIES RATE_LIMIT_TRUSTED_PROXIES REDIS_URL DO_NOT_TRACK ANALYTICS_DISABLED MULTICA_CLOUD_URL
     COOKIE_DOMAIN MULTICA_DEV_VERIFICATION_CODE HOME TMPDIR)

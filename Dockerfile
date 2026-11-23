@@ -6,15 +6,19 @@
 #
 #   backend  ghcr.io/multica-ai/multica-backend  static Go binaries + SQL migrations, port 8080
 #   web      ghcr.io/multica-ai/multica-web      Next.js standalone (Alpine), 127.0.0.1:3000
+#   collab   ghcr.io/multica-ai/multica-collab   live co-editing of Docs and issue descriptions
+#            (Node + tsx, pure JS), 8095; reached by editors only through the backend's /collab
 #   nginx    port 8000 (public): WebSockets and API paths to the backend, the rest to the web app
 
 FROM ghcr.io/multica-ai/multica-backend:v0.12.0@sha256:3209617d796195e8793d4e3cb85a676b0513cab99b843fdc8aaa206f7925c37a AS backend
 FROM ghcr.io/multica-ai/multica-web:v0.12.0@sha256:d55c317d860135ea1fb637caa6bd9feafa9173f2f22db8a08dcf207ec4203268 AS web
+FROM ghcr.io/multica-ai/multica-collab:v0.12.0@sha256:d5b4d4b1f5702fd79172cfe85939f5d627f1f79e0558a722a3467e2c7dd6db3e AS collab
 
 FROM cloudron/node-base:24-20260920@sha256:d984683ec59bf2379130bf41cf3c2b6bc0453f327297d7183525cb05424e7b34
 
 COPY --from=backend /app /app/code/backend
 COPY --from=web /app /app/code/web
+COPY --from=collab /app /app/code/collab
 
 # The web image only ships the Alpine (musl) build of sharp, which Next.js uses for image
 # optimisation; this base image is glibc. Add the glibc build of the exact versions sharp asks for,
@@ -44,6 +48,16 @@ RUN set -eux; \
     node -e "const s = require(require.resolve('sharp', { paths: [process.argv[1]] })); \
       s({ create: { width: 4, height: 4, channels: 3, background: '#f00' } }).webp().toBuffer() \
         .then(b => console.log('sharp ok, libvips', s.versions.vips, b.length, 'bytes'))" "${next_dir}"; \
+    if find /app/code/collab/node_modules -name '*.node' | grep -q .; then \
+        echo "collab ships native modules built for Alpine; they need a glibc build here"; exit 1; \
+    fi; \
+    (cd /app/code/collab/apps/collab && COLLAB_SECRET=x MULTICA_API_URL=http://127.0.0.1:8080 \
+        node --import tsx -e "await import('./src/dom.ts'); \
+          const { loadConfig } = await import('./src/config.ts'); \
+          const { createDocumentCodec } = await import('@multica/views/editor/schema/codec'); \
+          const { createCollabServer } = await import('./src/server.ts'); \
+          const c = loadConfig(); createCollabServer(c, createDocumentCodec({ cdnDomain: '' }), console); \
+          console.log('collab loads, port', c.port)"); \
     node -v
 
 # Supervisor's own log and child logs default to /var/log, which is read-only on Cloudron.
@@ -52,11 +66,11 @@ RUN sed -e 's,^logfile=.*$,logfile=/run/supervisord.log,' \
         -e 's,^\[supervisord\]$,[supervisord]\nuser=root,' \
         -i /etc/supervisor/supervisord.conf
 
-COPY start.sh app-env.sh backend.sh web.sh nginx.conf /app/pkg/
+COPY start.sh app-env.sh backend.sh web.sh collab.sh nginx.conf /app/pkg/
 COPY supervisor/ /etc/supervisor/conf.d/
 # Set modes explicitly: the build context can arrive with 0600 files (seen with Cloudron's
 # on-server build), and the processes run as `cloudron`.
-RUN chmod 0755 /app/pkg /app/pkg/start.sh /app/pkg/app-env.sh /app/pkg/backend.sh /app/pkg/web.sh \
+RUN chmod 0755 /app/pkg /app/pkg/start.sh /app/pkg/app-env.sh /app/pkg/backend.sh /app/pkg/web.sh /app/pkg/collab.sh \
     && chmod 0644 /app/pkg/nginx.conf /etc/supervisor/conf.d/*.conf
 
 RUN mkdir -p /run/multica/nginx \

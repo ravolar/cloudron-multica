@@ -40,6 +40,11 @@ web_env_clean() {
     env=$(docker exec -u cloudron "${ID}-app" bash -c 'tr "\0" "\n" < "/proc/$(pgrep -f "^next-server" | head -1)/environ"')
     grep -q '^REMOTE_API_URL=' <<<"${env}" && ! grep -qE '^(JWT_SECRET|DATABASE_URL|SMTP_PASSWORD|MULTICA_[A-Z_]*SECRET_KEY|REDIS_URL)=' <<<"${env}"
 }
+collab_env_clean() {
+    local env
+    env=$(docker exec -u cloudron "${ID}-app" bash -c 'tr "\0" "\n" < "/proc/$(pgrep -f "tsx src/index.ts" | head -1)/environ"')
+    grep -q '^COLLAB_SECRET=.\{32,\}' <<<"${env}" && ! grep -qE '^(JWT_SECRET|DATABASE_URL|SMTP_PASSWORD|MULTICA_[A-Z_]*SECRET_KEY|REDIS_URL)=' <<<"${env}"
+}
 status() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
 
 echo "==> Starting PostgreSQL (${PG_IMAGE})"
@@ -62,6 +67,7 @@ mkdir -p "${WORK}/data"
 cat > "${WORK}/data/env.sh" <<EOF
 ALLOWED_EMAILS="${EMAIL}"
 ALLOW_SIGNUP="no"
+FF_DOCS_V1="true"
 EOF
 
 start_app() {
@@ -100,6 +106,10 @@ run_checks() {
     check "server config answers (/api/config)" bash -c "curl -fs '${ORIGIN}/api/config' | jq -e 'type == \"object\"'"
     check "migrations applied" bash -c "docker exec ${ID}-pg psql -U multicauser -d multicadb -tAc 'select count(*) from information_schema.tables where table_schema = current_schema()' | awk '\$1 > 20 {ok=1} END {exit !ok}'"
     check "WebSocket path reaches the backend (/ws)" bash -c "c=\$(curl -s -o /dev/null -w '%{http_code}' -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' '${ORIGIN}/ws'); [ \"\$c\" != 404 ] && [ \"\$c\" != 502 ]"
+    check "collab service healthy on its port" app_exec curl -fs http://127.0.0.1:8095/health
+    check "collab WebSocket path reaches the backend (/collab)" bash -c "c=\$(curl -s -o /dev/null -w '%{http_code}' -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' -m 5 '${ORIGIN}/collab'); [ \"\$c\" != 404 ] && [ \"\$c\" != 502 ]"
+    check "backend's internal collab endpoints not public" test "$(status "${ORIGIN}/internal/collab/docs/00000000-0000-0000-0000-000000000000")" = 404
+    check "collab process does not get the backend's secrets" collab_env_clean
     check "readiness/metrics endpoints not public" test "$(status "${ORIGIN}/readyz")" = 404
     check "web app on loopback only" app_exec bash -c 'grep -q "0100007F:0BB8 00000000:0000 0A" /proc/net/tcp'
     check "telemetry disabled" grep -q "DO_NOT_TRACK" <<<"${logs}"
@@ -139,6 +149,20 @@ check "personal access token for the CLI/daemon" test -n "${pat}"
 check "agent daemon WebSocket upgrades with the token (/api/daemon/ws)" test "$(curl -s --http1.1 -m 3 -o /dev/null -w '%{http_code}' \
     -H "Authorization: Bearer ${pat}" -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' \
     -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' "${ORIGIN}/api/daemon/ws" || true)" = 101
+api() { curl -fs -H "Authorization: Bearer ${token}" -H 'Content-Type: application/json' ${ws:+-H "X-Workspace-ID: ${ws}"} "$@"; }
+ws=$(api -X POST -d '{"name":"Smoke","slug":"smoke-test"}' "${ORIGIN}/api/workspaces" | jq -r '.id // empty')
+check "workspace can be created" test -n "${ws}"
+doc=$(api -X POST -d '{"title":"Smoke doc","content":"first"}' "${ORIGIN}/api/docs" | jq -r '.id // empty')
+check "Docs enabled by FF_DOCS_V1 (doc created)" test -n "${doc}"
+check "collab ticket issued for the doc (live editing on)" bash -c "curl -fs -X POST -H 'Authorization: Bearer ${token}' -H 'X-Workspace-ID: ${ws}' '${ORIGIN}/api/docs/${doc}/collab-ticket' | jq -e '.enabled == true and (.token | length > 0)'"
+rev=$(api "${ORIGIN}/api/docs/${doc}" | jq -r '.revision // empty')
+api -X PATCH -d "{\"content\":\"second\",\"base_revision\":${rev:-0}}" "${ORIGIN}/api/docs/${doc}" >/dev/null || true
+# A real editor: a Hocuspocus client (as in the browser) connects through nginx and the backend's
+# /collab proxy, syncs the doc and receives an API edit live. Runs in a throwaway Node container.
+probe=$(docker run --rm --network host -v "$(cd "$(dirname "$0")" && pwd)/collab-probe.mjs:/p/probe.mjs:ro" -w /p node:22-alpine \
+    sh -c "npm i -s --no-audit --no-fund @hocuspocus/provider@4 yjs@13 ws@8 >/dev/null 2>&1 && timeout 60 node probe.mjs '${ORIGIN}' '${token}' '${ws}' '${doc}'" 2>&1 || true)
+check "live editing through /collab (editor syncs, sees an API edit live)" grep -q LIVE_UPDATE_OK <<<"${probe}"
+check "doc edit through the collab service is stored" bash -c "curl -fs -H 'Authorization: Bearer ${token}' -H 'X-Workspace-ID: ${ws}' '${ORIGIN}/api/docs/${doc}' | jq -e '.content | test(\"second|live edit\")'"
 curl -s -X POST -H 'Content-Type: application/json' -d '{"email":"stranger@example.org"}' "${ORIGIN}/auth/send-code" >/dev/null
 check "other addresses cannot sign up (ALLOW_SIGNUP=\"no\" stays closed)" no_match "Verification code for stranger@example.org" "$(docker logs "${ID}-app" 2>&1)"
 codes=$(for _ in $(seq 1 8); do status -X POST -H 'Content-Type: application/json' -d "{\"email\":\"${EMAIL}\"}" "${ORIGIN}/auth/send-code"; echo; done)
@@ -148,6 +172,8 @@ echo "==> Restart"
 docker restart "${ID}-app" >/dev/null
 if wait_ready; then pass "app restarted"; else fail "app restarted"; docker logs "${ID}-app" 2>&1 | tail -60; exit 1; fi
 check "session survives a restart (stable JWT secret)" bash -c "curl -fs -H 'Authorization: Bearer ${token}' '${ORIGIN}/api/me' | jq -e --arg e '${EMAIL}' '.email == \$e'"
+check "doc kept across restart" bash -c "curl -fs -H 'Authorization: Bearer ${token}' -H 'X-Workspace-ID: ${ws}' '${ORIGIN}/api/docs/${doc}' | jq -e '.content | test(\"second|live edit\")'"
+check "collab service back after restart" app_exec curl -fs http://127.0.0.1:8095/health
 check "secrets kept across restart" test "$(app_exec stat -c %U:%a /app/data/.secrets/secrets.env)" = "root:600"
 
 if [[ ${FAILED} -ne 0 ]]; then
