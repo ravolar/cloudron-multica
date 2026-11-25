@@ -10,9 +10,9 @@
 #            (Node + tsx, pure JS), 8095; reached by editors only through the backend's /collab
 #   nginx    port 8000 (public): WebSockets and API paths to the backend, the rest to the web app
 
-FROM ghcr.io/multica-ai/multica-backend:v0.12.1@sha256:97bc0e3e7127061249b063aeeef1a6c3c3b65ac8a371465ae589f9545bc583e3 AS backend
-FROM ghcr.io/multica-ai/multica-web:v0.12.1@sha256:ffd57e0234cfa825f225160f06f2fa53cbfdff4ae3b277ec8a662e25738c4520 AS web
-FROM ghcr.io/multica-ai/multica-collab:v0.12.1@sha256:7a623b6e9cff308df29f6d5fa774735c5b5d63212134f735862ddbbea3caebfc AS collab
+FROM ghcr.io/multica-ai/multica-backend:v0.13.0@sha256:ff3ce6c2356b4c938f9827a0753df212f36e38c9543dd83d3aabbadc4ee28c9f AS backend
+FROM ghcr.io/multica-ai/multica-web:v0.13.0@sha256:99ad104c2139da15568d071bea2e5807dbcdb7241613704a558f9daad8182af5 AS web
+FROM ghcr.io/multica-ai/multica-collab:v0.13.0@sha256:52d8c14f3125f398c01be099a249ef891f3b0dd6eb1726150f9c7506288b7f90 AS collab
 
 FROM cloudron/node-base:24-20260920@sha256:d984683ec59bf2379130bf41cf3c2b6bc0453f327297d7183525cb05424e7b34
 
